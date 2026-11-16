@@ -5,15 +5,19 @@
 **Course:** NMED 3203 — Interactive Media Applications
 **Selected premises:** Agency (01) + Temporality (04)
 
-**Experience in one line:** Slide a blue square to dodge falling red blocks, and feel your reaction window shrink as the blocks speed up over time.
+**Experience in one line:** Slide a blue square to catch rewards and dodge the rest, and keep up as everything falls faster the longer you survive.
+
+> **v2 "Items":** the falling blocks are now different items. See [SPEC.md](./SPEC.md) for the full rules. The Items card next to the game explains every icon.
 
 ## How to play
 
 1. Choose **Normal** or **Fast** and press **Start Game**.
-2. Move the blue square left and right so the red striped blocks never touch it.
-3. Blocks arrive one by one at random moments and heights, several at the same time. You never wait for one to leave before the next appears, and some moments bring no block. A way through always exists. Each block that passes you safely gives **1 point**.
-4. Every 10 seconds of survival the blocks fall faster ("Speed increased!") and change to a new random colour. The Speed panel shows the current level and the time until the next speed-up.
-5. If a block touches you, the run ends. Press **Restart** to try again.
+2. Move the blue square left and right. **Catch rewards** (rounded pills) and **dodge expenses** (striped blocks) and **bad mods** (octagons).
+3. Items arrive at random moments, several at the same time. A way through the expenses always exists. Each expense or bad mod that passes you safely gives **1 point**.
+4. You start with **0 hearts** (top left; max 3, earn them with **Extra life**). A heart saves you from one hit by a **Block** or a bomb (Small/Big expense). With no heart, a Block ends the run, and Small expense (−1) and Big expense (−5) come straight off your score. **Crash** ends the run even with lives. About half of everything that falls is the classic Block.
+5. Rewards: **x2 Bonus**, **Extra life**, **Shield**, **Slow time**. Bad mods: **Speed x2**, **Reverse**, **Ghost** (you turn invisible for 5 s). Active effects show with a countdown (top right).
+6. Every 10 seconds everything falls faster.
+7. The run ends on a **Block** with no heart, or on a **Crash**. Press **Restart** to try again. The "−1" and "−5" items come straight off your score, which can even go below 0.
 
 ## Controls
 
@@ -52,8 +56,10 @@ python3 -m http.server 8000
 | --- | --- |
 | `index.html` | Page structure: title, score panel, canvas, menus, on-screen buttons |
 | `styles.css` | Layout, colours, focus styles, phone layout |
-| `src/config.js` | **All rule settings. Edit here.** |
-| `src/game.js` | Game state, update loop, random spawning, collision, difficulty, drawing |
+| `src/config.js` | **All rule settings and the `ITEMS` table. Edit here.** |
+| `src/items.js` | How each item and icon is drawn (used by the game and the Items card) |
+| `src/game.js` | Game state, update loop, random spawning, items and effects, collision, difficulty, drawing |
+| `SPEC.md` | v2 rules |
 | `src/scenery.js` | Pixel-art sky, clouds, city, trees and grass (drawn in code) |
 | `src/main.js` | Buttons, keyboard and touch events, updates the page text |
 | `RATIONALE.md` | Design rationale and references |
@@ -75,6 +81,9 @@ Open `src/config.js`, change a number, save and refresh the page.
 | `spawnSkipChance` | Chance that a moment brings no block |
 | `safeGapMarginPx` | Extra room around the invisible safe path (bigger = easier) |
 | `corridorSafetyFactor` | How fast the safe path may move (lower = easier) |
+| `startingLives` / `maxLives` | Lives at the start and the cap |
+| `ITEMS.<item>.weight` | How often an item appears (bigger = more often) |
+| `ITEMS.<item>.duration` / `multiplier` / `penalty` | Length and strength of effects, cost of expenses |
 
 If a setting could make the game impossible, a warning appears in the browser console (`checkFairness` in `src/game.js`).
 

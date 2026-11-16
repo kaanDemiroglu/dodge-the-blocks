@@ -5,15 +5,19 @@
 **Ders:** NMED 3203 — Interactive Media Applications
 **Seçilen temalar:** Agency / Eylemlilik (01) + Temporality / Zamansallık (04)
 
-**Tek cümleyle deneyim:** Mavi bir kareyi kaydırarak yukarıdan düşen kırmızı blokları ört ve bloklar hızlandıkça tepki sürenin kısaldığını hisset.
+**Tek cümleyle deneyim:** Mavi bir kareyi kaydırarak ödülleri topla, gerisinden kaç. Hayatta kaldıkça her şey daha hızlı düşer.
+
+> **v2 "Eşyalar":** Düşen bloklar artık farklı eşyalar. Tüm kurallar için [SPEC.md](./SPEC.md) dosyasına bak (İngilizce). Oyunun yanındaki Items kartı her ikonu açıklar.
 
 ## Nasıl oynanır
 
 1. **Normal** veya **Fast** modunu seç ve **Start Game**'e bas.
-2. Mavi kareyi sağa sola hareket ettir; kırmızı çizgili bloklar ona hiç değmesin.
-3. Bloklar rastgele zamanlarda ve yüksekliklerde, aynı anda birkaç tane gelir. Bir bloğun gitmesini beklemeden yenisi belirir, bazı anlarda hiç blok gelmez. Geçiş için her zaman bir yol vardır. Sana değmeden geçen her blok **1 puan** verir.
-4. Hayatta kaldığın her 10 saniyede bloklar daha hızlı düşer ("Speed increased!") ve yeni bir rastgele renge geçer. Speed paneli mevcut seviyeyi ve bir sonraki hızlanmaya kalan süreyi gösterir.
-5. Bir blok sana değerse oyun biter. Tekrar denemek için **Restart**'a bas.
+2. Mavi kareyi sağa sola hareket ettir. **Ödülleri topla** (yuvarlak hap şekilleri), **harcamalardan** (çizgili bloklar) ve **kötü modlardan** (sekizgenler) kaç.
+3. Eşyalar rastgele zamanlarda, aynı anda birkaç tane gelir. Harcamaların arasından geçiş için her zaman bir yol vardır. Sana değmeden geçen her harcama veya kötü mod **1 puan** verir.
+4. **0 kalple** başlarsın (sol üstte, en fazla 3; **Extra life** ile kazanılır). Bir kalp seni bir **Block** ya da bomba (Small/Big expense) darbesinden kurtarır. Kalbin yokken Block oyunu bitirir, Small expense (−1) ve Big expense (−5) doğrudan puanından düşer. **Crash** canın olsa bile oyunu bitirir. Düşenlerin yaklaşık yarısı klasik Block'tur.
+5. Ödüller: **x2 Bonus**, **Extra life**, **Shield** (kalkan), **Slow time**. Kötü modlar: **Speed x2**, **Reverse** (yön ters), **Ghost** (5 saniye görünmez olursun). Aktif etkiler geri sayımla sağ üstte görünür.
+6. Her 10 saniyede her şey daha hızlı düşer.
+7. Kalbin yokken **Block**'a ya da her durumda **Crash**'e değersen oyun biter. Tekrar denemek için **Restart**'a bas. "−1" ve "−5" eşyaları doğrudan puanından düşer, puan 0'ın altına bile inebilir.
 
 ## Kontroller
 
@@ -52,8 +56,10 @@ python3 -m http.server 8000
 | --- | --- |
 | `index.html` | Sayfa yapısı: başlık, skor paneli, canvas, menüler, ekran butonları |
 | `styles.css` | Yerleşim, renkler, odak stilleri, telefon düzeni |
-| `src/config.js` | **Tüm kural ayarları. Değişiklik buradan yapılır.** |
-| `src/game.js` | Oyun durumu, güncelleme döngüsü, rastgele blok üretimi, çarpışma, zorluk, çizim |
+| `src/config.js` | **Tüm kural ayarları ve `ITEMS` tablosu. Değişiklik buradan yapılır.** |
+| `src/items.js` | Her eşyanın ve ikonun çizimi (oyun ve Items kartı aynı kodu kullanır) |
+| `src/game.js` | Oyun durumu, güncelleme döngüsü, rastgele üretim, eşyalar ve etkiler, çarpışma, zorluk, çizim |
+| `SPEC.md` | v2 kuralları (İngilizce) |
 | `src/scenery.js` | Pixel-art gökyüzü, bulut, şehir, ağaç ve çim (kodla çizilir) |
 | `src/main.js` | Butonlar, klavye ve dokunma olayları, sayfa metinlerinin güncellenmesi |
 | `RATIONALE.md` | Tasarım gerekçesi ve kaynaklar (İngilizce) |
@@ -75,6 +81,9 @@ python3 -m http.server 8000
 | `spawnSkipChance` | Bir anda hiç blok gelmeme olasılığı |
 | `safeGapMarginPx` | Görünmez güvenli yolun etrafındaki ek boşluk (büyüdükçe daha kolay) |
 | `corridorSafetyFactor` | Güvenli yolun ne kadar hızlı kayabileceği (küçüldükçe daha kolay) |
+| `startingLives` / `maxLives` | Başlangıç canı ve üst sınır |
+| `ITEMS.<eşya>.weight` | Eşyanın ne kadar sık geldiği (büyüdükçe daha sık) |
+| `ITEMS.<eşya>.duration` / `multiplier` / `penalty` | Etkilerin süresi ve gücü, harcamaların bedeli |
 
 Bir ayar oyunu imkânsız hale getirebilecekse tarayıcı konsolunda uyarı çıkar (`src/game.js` içindeki `checkFairness`).
 
