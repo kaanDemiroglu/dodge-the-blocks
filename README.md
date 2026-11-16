@@ -1,5 +1,7 @@
 # Dodge the Blocks
 
+**English** | [Türkçe](./README.tr.md)
+
 **Course:** NMED 3203 — Interactive Media Applications
 **Selected premises:** Agency (01) + Temporality (04)
 
