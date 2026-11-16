@@ -7,8 +7,9 @@
 // Reads every rule from config.js. It never touches the page (HTML) directly:
 // it talks to main.js through the "hooks" given to initGame().
 
-import { CONFIG, THEME } from "./config.js";
+import { CONFIG, THEME, ITEMS } from "./config.js";
 import { createGameScenery } from "./scenery.js";
+import { drawItem, heartPath, roundedRect } from "./items.js";
 
 let canvas;
 let ctx;
@@ -70,7 +71,10 @@ export function resetGame(mode = "normal") {
     spawnTimer: CONFIG.firstBlockDelayMilliseconds / 1000, // seconds until the next block may appear
     // Hidden "safe path": blocks never spawn on it, so a way through always exists.
     corridor: { x: CONFIG.canvasWidth / 2, target: CONFIG.canvasWidth / 2 },
-    blockColor: THEME.obstaclePalette[0], // colour of all blocks; changes at every speed increase
+    lives: CONFIG.startingLives,  // a life absorbs one expense hit (no score loss)
+    effects: {},                  // active timed effects: item kind -> seconds left
+    popups: [],                   // floating texts ("-5", "+1 life") drawn over the canvas
+    endReason: null,              // "crash" | "block" once the run is over
     scroll: 0,                    // how far the clouds have drifted (only for the look of speed)
     obstacles: [],
     player: {
@@ -95,8 +99,9 @@ function stopLoop() {
   frameId = null;
 }
 
-function endGame() {
+function endGame(reason) {
   state.status = "gameover";
+  state.endReason = reason;
   stopLoop();
   draw(); // freeze the final frame
   hooks.onUpdate(getHudInfo());
@@ -119,28 +124,127 @@ function update(dt) {
   if (state.status !== "playing") return;
 
   state.elapsed += dt;
-  state.scroll += state.speed * CONFIG.cloudScrollRatio * dt;
+  tickEffects(dt);
+  tickPopups(dt);
+  const fallSpeed = state.speed * getSpeedMultiplier();
+  state.scroll += fallSpeed * CONFIG.cloudScrollRatio * dt;
   applyDifficulty();
   movePlayer(dt);
   moveCorridor(dt);
   spawnBlocks(dt);
 
   for (const obstacle of state.obstacles) {
-    obstacle.y += state.speed * dt;
+    obstacle.y += fallSpeed * dt;
 
     if (checkCollision(state.player, obstacle)) {
-      endGame();
-      return; // game over happens once; nothing else updates
+      obstacle.hit = true; // the item is used up when touched
+      if (collectItem(obstacle)) return; // the run ended; nothing else updates
+      continue;
     }
 
-    // Temporality + Agency payoff: the block got past the player without a hit.
+    // Temporality + Agency payoff: a harmful item got past the player without a hit.
     if (!obstacle.scored && obstacle.y > state.player.y + state.player.size) {
       obstacle.scored = true;
-      state.score += 1;
+      if (ITEMS[obstacle.kind].group !== "reward") addScore(1);
     }
   }
 
-  state.obstacles = state.obstacles.filter((o) => o.y < CONFIG.canvasHeight);
+  state.obstacles = state.obstacles.filter((o) => !o.hit && o.y < CONFIG.canvasHeight);
+}
+
+// ---------------------------------------------------------------- items and effects
+
+// Points gained are doubled while the x2 Bonus is active (penalties too, see collectItem).
+function addScore(points) {
+  state.score += points * (isActive("double") ? ITEMS.double.multiplier : 1);
+}
+
+function isActive(kind) {
+  return (state.effects[kind] || 0) > 0;
+}
+
+function startEffect(kind) {
+  state.effects[kind] = ITEMS[kind].duration;
+}
+
+function tickEffects(dt) {
+  for (const kind of Object.keys(state.effects)) {
+    state.effects[kind] -= dt;
+    if (state.effects[kind] <= 0) delete state.effects[kind];
+  }
+}
+
+// How much faster/slower than the base speed things fall (Speed x2 and Slow time can cancel out).
+function getSpeedMultiplier() {
+  return (isActive("rush") ? ITEMS.rush.multiplier : 1) * (isActive("slow") ? ITEMS.slow.multiplier : 1);
+}
+
+function addPopup(text, color) {
+  const p = state.player;
+  state.popups.push({ text, color, x: p.x + p.size / 2, y: p.y - 6, age: 0 });
+}
+
+function tickPopups(dt) {
+  state.popups.forEach((popup) => { popup.age += dt; });
+  state.popups = state.popups.filter((popup) => popup.age < CONFIG.popupSeconds);
+}
+
+// The player touched an item. Returns true if this ended the run.
+function collectItem(obstacle) {
+  const item = ITEMS[obstacle.kind];
+
+  if (item.group === "reward") {
+    if (obstacle.kind === "life") {
+      if (state.lives >= CONFIG.maxLives) {
+        addPopup("Lives full", "#ffffff");
+      } else {
+        state.lives += 1;
+        addPopup("+1 life", "#ff8ab8");
+      }
+    } else {
+      startEffect(obstacle.kind);
+      addPopup(item.name, "#fff176");
+    }
+    hooks.onEvent(`${item.name}!`);
+    return false;
+  }
+
+  // Expenses and bad mods: a Shield blocks both.
+  if (isActive("shield")) {
+    addPopup("Blocked!", "#22d3ee");
+    return false;
+  }
+
+  if (item.group === "mod") {
+    startEffect(obstacle.kind);
+    addPopup(item.name, "#e9b6ff");
+    hooks.onEvent(`${item.name}!`);
+    return false;
+  }
+
+  // Expense. Crash ends the run even if you have lives.
+  if (item.ignoresLives) {
+    endGame("crash");
+    return true;
+  }
+  // Block, Small expense and Big expense: a heart takes the hit if you have one.
+  if (state.lives > 0) {
+    state.lives -= 1;
+    addPopup("-1 life", "#ff8a8a");
+    hooks.onEvent("Life lost!");
+    return false;
+  }
+  // No heart left: the classic Block ends the run.
+  if (item.fatal) {
+    endGame("block");
+    return true;
+  }
+  // "-1" and "-5" simply come off the score (it may even go below 0).
+  // The x2 Bonus doubles this too, so -5 becomes -10.
+  const cost = item.penalty * (isActive("double") ? ITEMS.double.multiplier : 1);
+  state.score -= cost;
+  addPopup(`-${cost}`, "#ff8a8a");
+  return false;
 }
 
 // ---------------------------------------------------------------- Temporality
@@ -157,16 +261,8 @@ export function applyDifficulty() {
   );
   if (newSpeed > state.speed) {
     state.speed = newSpeed;
-    state.blockColor = pickNewBlockColor();
     hooks.onSpeedUp(getHudInfo());
   }
-}
-
-// Random colour from the palette, never the same one twice in a row.
-function pickNewBlockColor() {
-  const choices = THEME.obstaclePalette.filter((color) => color !== state.blockColor);
-  if (choices.length === 0) return state.blockColor;
-  return choices[Math.floor(Math.random() * choices.length)];
 }
 
 // ---------------------------------------------------------------- Agency
@@ -183,8 +279,10 @@ export function releaseAllMovement() {
 }
 
 // -1 = left, +1 = right, 0 = none. Holding both directions cancels out.
+// The Reverse bad mod swaps left and right.
 function getDirection() {
-  return (held.right.size > 0 ? 1 : 0) - (held.left.size > 0 ? 1 : 0);
+  const direction = (held.right.size > 0 ? 1 : 0) - (held.left.size > 0 ? 1 : 0);
+  return isActive("reverse") ? -direction : direction;
 }
 
 function movePlayer(dt) {
@@ -208,20 +306,34 @@ function spawnBlocks(dt) {
   }
 }
 
-// Adds one block at a random valid x. It avoids the hidden safe path (fairness)
-// and does not spawn right on top of another block.
+// Picks what falls next: a random item, more likely when its weight is bigger.
+function pickItemKind() {
+  const weights = Object.entries(ITEMS).map(([kind, item]) => [kind, item.weight]);
+  let roll = Math.random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
+  for (const [kind, weight] of weights) {
+    roll -= weight;
+    if (roll < 0) return kind;
+  }
+  return weights[0][0];
+}
+
+// Adds one item at a random valid x. Harmful items (expenses, bad mods) avoid the hidden
+// safe path (fairness); rewards may land anywhere. Nothing spawns right on top of another item.
 export function spawnObstacle() {
+  const kind = pickItemKind();
+  const harmful = ITEMS[kind].group !== "reward";
   const half = getCorridorHalfWidth();
   for (let attempt = 0; attempt < CONFIG.spawnPlacementAttempts; attempt++) {
     const x = Math.random() * (CONFIG.canvasWidth - CONFIG.obstacleWidth);
 
-    const onSafePath = x < state.corridor.x + half && x + CONFIG.obstacleWidth > state.corridor.x - half;
+    const onSafePath = harmful && x < state.corridor.x + half && x + CONFIG.obstacleWidth > state.corridor.x - half;
     const touchesAnother = state.obstacles.some(
       (o) => o.y < CONFIG.minBlockSpacingPx && x < o.x + o.width && x + CONFIG.obstacleWidth > o.x
     );
     if (onSafePath || touchesAnother) continue;
 
     state.obstacles.push({
+      kind,
       x,
       y: -CONFIG.obstacleHeight, // just above the top edge
       width: CONFIG.obstacleWidth,
@@ -255,6 +367,8 @@ function getHudInfo() {
     score: state.score,
     elapsed: state.elapsed,
     level: state.level,
+    lives: state.lives,
+    endReason: state.endReason,
     maxLevel: Math.max(1, Math.ceil(speedRange / Math.max(1, CONFIG.speedIncreasePxPerSecond))),
     speed: state.speed,
     maxed,
@@ -321,7 +435,7 @@ export function checkFairness() {
   if (c.corridorSafetyFactor <= 0 || c.corridorSafetyFactor > 1) {
     warnings.push("corridorSafetyFactor should be between 0 and 1.");
   }
-  if (c.maxFrameSeconds * c.maximumObstacleSpeedPxPerSecond >= c.obstacleHeight + c.playerSize) {
+  if (c.maxFrameSeconds * c.maximumObstacleSpeedPxPerSecond * ITEMS.rush.multiplier >= c.obstacleHeight + c.playerSize) {
     warnings.push("maxFrameSeconds is too large: fast blocks could pass through the player.");
   }
   return warnings;
@@ -330,37 +444,101 @@ export function checkFairness() {
 // ---------------------------------------------------------------- drawing
 
 export function draw() {
-  // Layers from back to front: sky + clouds, city + grass, blocks, player.
+  // Layers from back to front: sky + clouds, city + grass, items, player, popups, HUD on the canvas.
   scenery.drawSky(ctx, reduceMotion ? 0 : state.scroll);
   scenery.drawGround(ctx);
-  state.obstacles.forEach(drawObstacle);
-  drawPlayer(state.player);
+  state.obstacles.forEach((o) => drawItem(ctx, ITEMS[o.kind], o.x, o.y, o.width, o.height));
+  // Ghost mode: the player cannot be seen (it still moves and still gets hit).
+  if (!isActive("ghost")) {
+    drawPlayer(state.player);
+    if (isActive("shield")) drawShieldRing(state.player);
+  }
+  drawPopups();
+  drawLives();
+  drawEffectBadges();
 }
 
-function drawObstacle(o) {
-  // Coloured rectangle with diagonal stripes: a different SHAPE/PATTERN, not just a different colour.
+function drawShieldRing(p) {
   ctx.save();
   ctx.beginPath();
-  ctx.rect(o.x, o.y, o.width, o.height);
-  ctx.clip();
-  ctx.fillStyle = state.blockColor;
-  ctx.fillRect(o.x, o.y, o.width, o.height);
-  ctx.strokeStyle = THEME.obstacleStripe;
-  ctx.lineWidth = 5;
-  for (let sx = o.x - o.height; sx < o.x + o.width; sx += 14) {
-    ctx.beginPath();
-    ctx.moveTo(sx, o.y + o.height);
-    ctx.lineTo(sx + o.height, o.y);
-    ctx.stroke();
-  }
-  ctx.fillStyle = THEME.obstacleLight; // light top edge
-  ctx.fillRect(o.x, o.y, o.width, 3);
-  ctx.fillStyle = THEME.obstacleShade; // dark bottom edge
-  ctx.fillRect(o.x, o.y + o.height - 4, o.width, 4);
-  ctx.restore();
-  ctx.strokeStyle = THEME.obstacleOutline;
+  ctx.arc(p.x + p.size / 2, p.y + p.size / 2, p.size * 0.85, 0, Math.PI * 2);
   ctx.lineWidth = 3;
-  ctx.strokeRect(o.x + 1.5, o.y + 1.5, o.width - 3, o.height - 3);
+  ctx.strokeStyle = ITEMS.shield.color;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPopups() {
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = '800 18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = THEME.obstacleOutline;
+  for (const popup of state.popups) {
+    const t = popup.age / CONFIG.popupSeconds;
+    ctx.globalAlpha = 1 - t * t;
+    const y = popup.y - t * 34;
+    ctx.strokeText(popup.text, popup.x, y);
+    ctx.fillStyle = popup.color;
+    ctx.fillText(popup.text, popup.x, y);
+  }
+  ctx.restore();
+}
+
+// Top left: one heart per possible life. Full = a life you have, faded outline = an empty slot.
+function drawLives() {
+  const size = 22;
+  const gap = 6;
+  const pad = 6;
+  const width = CONFIG.maxLives * size + (CONFIG.maxLives - 1) * gap + pad * 2;
+  ctx.save();
+  roundedRect(ctx, 8, 8, width, size + pad * 2, 8);
+  ctx.fillStyle = "rgba(6, 27, 69, 0.7)";
+  ctx.fill();
+  for (let i = 0; i < CONFIG.maxLives; i++) {
+    heartPath(ctx, 8 + pad + size / 2 + i * (size + gap), 8 + pad + size / 2, size);
+    if (i < state.lives) {
+      ctx.fillStyle = ITEMS.life.color;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+    } else {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// Top right: one badge per active timed effect, with a bar that drains as time runs out.
+function drawEffectBadges() {
+  const width = 104;
+  const height = 28;
+  const x = CONFIG.canvasWidth - width - 8;
+  let row = 0;
+  ctx.save();
+  for (const [kind, item] of Object.entries(ITEMS)) {
+    if (!isActive(kind) || !item.duration) continue;
+    const y = 8 + row * (height + 5);
+    roundedRect(ctx, x, y, width, height, 8);
+    ctx.fillStyle = "rgba(6, 27, 69, 0.78)";
+    ctx.fill();
+    drawItem(ctx, item, x + 4, y + 5, 36, 18);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = '700 12px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${item.name} ${Math.ceil(state.effects[kind])}s`, x + 44, y + 11, width - 48);
+    ctx.fillStyle = item.color;
+    ctx.fillRect(x + 6, y + height - 5, (width - 12) * (state.effects[kind] / item.duration), 3);
+    row += 1;
+  }
+  ctx.restore();
 }
 
 function drawPlayer(p) {

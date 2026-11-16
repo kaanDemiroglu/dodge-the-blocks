@@ -1,7 +1,8 @@
 // main.js — connects the page (buttons, keyboard, text) to the game in game.js.
 
-import { CONFIG } from "./config.js";
+import { CONFIG, ITEMS, ITEM_GROUPS } from "./config.js";
 import { drawPageBackdrop } from "./scenery.js";
+import { drawItem } from "./items.js";
 import { initGame, startGame, resetGame, setMovement, releaseAllMovement, getState, getStartSpeed } from "./game.js";
 
 const $ = (id) => document.getElementById(id);
@@ -27,7 +28,54 @@ window.addEventListener("resize", () => {
 $("normal-speed").textContent = `Starts at ${getStartSpeed("normal")} px/s`;
 $("fast-speed").textContent = `Starts at ${getStartSpeed("fast")} px/s`;
 $("rule-text").textContent =
-  `Every ${CONFIG.difficultyIntervalSeconds} s the blocks fall ${CONFIG.speedIncreasePxPerSecond} px/s faster.`;
+  `Every ${CONFIG.difficultyIntervalSeconds} s everything falls ${CONFIG.speedIncreasePxPerSecond} px/s faster.`;
+
+// ---------------------------------------------------------------- Items card
+
+// One row per item, grouped. The icon is drawn by the same function as in the game,
+// so the shape you read here is exactly the shape that falls.
+function buildItemList() {
+  const list = $("item-list");
+  const ratio = window.devicePixelRatio || 1;
+  const w = CONFIG.obstacleWidth;
+  const h = CONFIG.obstacleHeight;
+
+  for (const group of ITEM_GROUPS) {
+    const section = document.createElement("section");
+    section.className = "item-group";
+    const title = document.createElement("h3");
+    title.textContent = group.title;
+    section.appendChild(title);
+
+    const ul = document.createElement("ul");
+    for (const item of Object.values(ITEMS).filter((entry) => entry.group === group.id)) {
+      const li = document.createElement("li");
+
+      const icon = document.createElement("canvas");
+      icon.width = w * ratio;
+      icon.height = h * ratio;
+      icon.style.width = `${w}px`;
+      icon.style.height = `${h}px`;
+      icon.setAttribute("aria-hidden", "true");
+      const iconCtx = icon.getContext("2d");
+      iconCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawItem(iconCtx, item, 0, 0, w, h);
+
+      const text = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const effect = document.createElement("small");
+      effect.textContent = item.effect;
+      text.append(name, effect);
+
+      li.append(icon, text);
+      ul.appendChild(li);
+    }
+    section.appendChild(ul);
+    list.appendChild(section);
+  }
+}
+buildItemList();
 
 // ---------------------------------------------------------------- messages and HUD
 
@@ -48,10 +96,10 @@ function updateHud(info) {
   $("time").textContent = `${info.elapsed.toFixed(1)} s`;
   $("mode").textContent = info.mode === "fast" ? "Fast" : "Normal";
   $("speed").textContent =
-    `Level ${info.level + 1} · ${Math.round(info.speed)} px/s${info.maxed ? " (max)" : ""}`;
+    `Level ${info.level + 1}${info.maxed ? " (max)" : ""}`;
   $("next-speedup").textContent = info.maxed
-    ? "Maximum speed reached"
-    : `Next speed-up in ${Math.ceil(info.secondsToNextSpeedUp)} s`;
+    ? "Top speed reached"
+    : `Faster in ${Math.ceil(info.secondsToNextSpeedUp)} s`;
   updateGauge(info);
 }
 
@@ -81,18 +129,25 @@ function updateGauge(info) {
 
 function showGameOver(info) {
   const modeName = info.mode === "fast" ? "Fast" : "Normal";
+  const title = "Crashed!";
+  $("gameover-title").textContent = title;
+  const why = {
+    block: "A block hit you with no heart left.",
+    crash: "A crash ended the run."
+  }[info.endReason];
   $("final-text").textContent =
-    `Final score: ${info.score}\nSurvived ${info.elapsed.toFixed(1)} s · ${modeName} mode · ${Math.round(info.speed)} px/s`;
+    `${why}\nFinal score: ${info.score}\nSurvived ${info.elapsed.toFixed(1)} s (level ${info.level + 1}) · ${modeName} mode`;
   gameOverScreen.hidden = false;
   // Announced by screen readers; not shown as the yellow banner.
   hideMessage();
-  messageBox.textContent = `Game over. Final score ${info.score}.`;
+  messageBox.textContent = `${title} Final score ${info.score}.`;
   $("restart-button").focus();
 }
 
 initGame(canvas, {
   onUpdate: updateHud,
   onSpeedUp: () => showMessage("Speed increased!", CONFIG.speedMessageSeconds),
+  onEvent: (text) => showMessage(text, CONFIG.eventMessageSeconds),
   onGameOver: showGameOver
 });
 
